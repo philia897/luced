@@ -37,7 +37,11 @@ impl Default for LuceConfig {
     fn default() -> Self {
         let mount_points: Vec<String> = vec!["/".to_string()];
         let interval_sec: u64 = 3600;
-        let database_path: PathBuf = config_dir().unwrap_or_else(|| PathBuf::new()).join("luced").join("database.sqlite");
+        let database_path: PathBuf = if config_dir().unwrap_or_else(|| PathBuf::new()).join("luced").exists() {
+            config_dir().unwrap_or_else(|| PathBuf::new()).join("luced").join("database.sqlite")
+        } else {
+            PathBuf::new().join("database.sqlite")
+        };
 
         Self {
             mount_points : mount_points,
