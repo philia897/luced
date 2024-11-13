@@ -1,0 +1,136 @@
+use rusqlite::{Connection, Result};
+use sysinfo::{Disks, Networks, System};
+use rusqlite::params;
+use tokio::time::{self, Duration};
+
+// Struct to hold system metrics
+#[derive(Debug)]
+struct SystemMetrics {
+    cpu_usage: f32,
+    memory_usage: f32,
+    network_usage: u64,
+    disk_usage: u64,
+    disk_free_space: u64,
+}
+
+// Define each column with its SQL type
+const REQUIRED_COLUMNS: &[(&str, &str)] = &[
+    ("cpu_usage", "REAL NOT NULL"),
+    ("memory_usage", "REAL NOT NULL"),
+    ("network_usage", "REAL NOT NULL"),
+    ("disk_usage", "REAL NOT NULL"),
+    ("disk_free_space", "REAL"),
+    ("timestamp", "TEXT DEFAULT CURRENT_TIMESTAMP")
+];
+
+// Function to initialize the SQLite database
+fn init_db() -> Result<Connection> {
+    let conn = Connection::open("system_metrics.db")?;
+
+    // Create the table if it doesn't exist
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS system_metrics (id INTEGER PRIMARY KEY)", 
+        []
+    )?;
+
+    // Retrieve the existing columns in the system_metrics table
+    let mut stmt = conn.prepare("PRAGMA table_info(system_metrics)")?;
+    let existing_columns: Vec<String> = stmt
+        .query_map([], |row| row.get(1))?
+        .collect::<Result<_, _>>()?;
+    drop(stmt); // Explicitly drop `stmt` here to release the borrow on `conn`
+
+    // Iterate over the REQUIRED_COLUMNS and add any missing columns
+    for (name, sql_type) in REQUIRED_COLUMNS {
+        if !existing_columns.contains(&name.to_string()) {
+            let alter_table_sql = format!("ALTER TABLE system_metrics ADD COLUMN {} {}", name, sql_type);
+            conn.execute(&alter_table_sql, [])?;
+            println!("Added column '{}' to 'system_metrics' table.", name);
+        }
+    }
+
+    Ok(conn)
+}
+
+// Function to collect system metrics
+fn collect_metrics() -> SystemMetrics {
+    let mut system = System::new_all();
+    system.refresh_all();
+
+    // // Collect CPU usage
+    // let cpu_usage = system.global_cpu_usage();
+
+    // // Collect memory usage
+    // let memory_usage = (system.used_memory() as f32 / system.total_memory() as f32) * 100.0;
+
+    // // Collect network usage (total received bytes for simplicity)
+    // let network_usage = system.networks().values().map(|data| data.received()).sum();
+
+    // // Collect disk usage (total read bytes for simplicity)
+    // let disk_usage = system.disks().iter().map(|disk| disk.total_space() - disk.available_space()).sum();
+
+    // Collect CPU usage
+    let cpu_usage = system.global_cpu_usage();
+
+    // Collect memory usage
+    let memory_usage = (system.used_memory() as f32 / system.total_memory() as f32) * 100.0;
+
+    // Collect network usage (total received bytes for simplicity)
+    let networks = Networks::new_with_refreshed_list();
+    let network_usage = networks.values().map(|data| data.total_received()).sum();
+
+    // Collect disk usage (total read bytes for simplicity)
+    let disks = Disks::new_with_refreshed_list();
+    let disk_usage = disks.iter().map(|disk| disk.total_space() - disk.available_space()).sum();
+    let disk_free_space = disks.iter().map(|disk| disk.available_space()).sum();
+
+    SystemMetrics {
+        cpu_usage,
+        memory_usage,
+        network_usage,
+        disk_usage,
+        disk_free_space,
+    }
+}
+
+// Function to save collected metrics to the database
+fn save_metrics(conn: &Connection, metrics: &SystemMetrics) -> Result<()> {
+    conn.execute(
+        "INSERT INTO system_metrics (cpu_usage, memory_usage, network_usage, disk_usage, disk_free_space) 
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            metrics.cpu_usage,
+            metrics.memory_usage,
+            metrics.network_usage as f64,
+            metrics.disk_usage as f64,
+            metrics.disk_free_space as f64,
+        ],
+    )?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Initialize the database connection
+    let conn = init_db()?;
+
+    // Set up an interval timer to run the task every hour
+    let mut interval = time::interval(Duration::from_secs(10));
+
+    loop {
+        interval.tick().await;
+
+        // Collect metrics
+        let metrics = collect_metrics();
+
+        // Print it out for debugging only
+        println!("{:#?}", metrics);  
+        
+        // Save metrics to database
+        if let Err(e) = save_metrics(&conn, &metrics) {
+            eprintln!("Failed to save metrics to database: {}", e);
+        } else {
+            println!("Metrics saved successfully");
+        }
+    }
+}

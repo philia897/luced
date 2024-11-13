@@ -1,0 +1,12 @@
+[Unit]
+Description=A lightweight system metrics collector daemon
+
+[Service]
+ExecStart=${BIN_PATH}/luced
+Restart=on-failure
+User=${USER}
+Environment=RUST_LOG=info
+TimeoutSec=60
+
+[Install]
+WantedBy=default.target

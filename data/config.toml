@@ -1,0 +1,10 @@
+# List the mount points you want to monitor, you can check by `df` command in Linux
+# Optional. Default to be ["/"]
+#mount_points = ["/", "/mnt/xxx"]
+
+# The interval of recording.
+# Optional. Default to be 3600 seconds
+#interval_sec = 3600
+
+# Optional, default to be in ~/.config/luced/system_metrics.db in Linux
+#database_path = "/custom/path/to/system_metrics.db"
